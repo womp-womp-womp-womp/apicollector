@@ -1,0 +1,32 @@
+server:
+  port: ${PORT:8080}
+  forward-headers-strategy: framework
+
+spring:
+  datasource:
+    url: jdbc:postgresql://${APICOLLECTOR_DB_HOST}:${APICOLLECTOR_DB_PORT:5432}/${APICOLLECTOR_DB_NAME}
+    username: ${APICOLLECTOR_DB_USERNAME}
+    password: ${APICOLLECTOR_DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: validate
+    show-sql: false
+
+  flyway:
+    enabled: true
+
+app:
+  database:
+    enabled: false
+
+  per-page: ${APICOLLECTOR_PER_PAGE:1000}
+  decay-time: ${APICOLLECTOR_DECAY_TIME:15}
+
+  api:
+    base-url: ${APICOLLECTOR_API_BASE_URL:https://ckkb-mos.online/publicapi/v1/inspections}
+    key: ${APICOLLECTOR_API_KEY}
+
+  cors:
+    allowed-origins: ${APICOLLECTOR_CORS_ALLOWED_ORIGINS:}

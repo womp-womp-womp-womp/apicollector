@@ -1,0 +1,21 @@
+spring:
+  application:
+    name: apicollector
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+app:
+  per-page: ${APICOLLECTOR_PER_PAGE:300}
+  decay-time: ${APICOLLECTOR_DECAY_TIME:15}
+  api:
+    base-url: ${APICOLLECTOR_API_BASE_URL:https://ckkb-mos.online/publicapi/v1/inspections}
+    key: ${APICOLLECTOR_API_KEY:}
+  database:
+    enabled: ${APICOLLECTOR_DB_ENABLED:true}
+    host: ${APICOLLECTOR_DB_HOST:localhost}
+    port: ${APICOLLECTOR_DB_PORT:5432}
+    name: ${APICOLLECTOR_DB_NAME:inspections_db}
+    admin-database: ${APICOLLECTOR_DB_ADMIN_DATABASE:postgres}
+    username: ${APICOLLECTOR_DB_USERNAME:postgres}
+    password: ${APICOLLECTOR_DB_PASSWORD:}
