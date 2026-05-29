@@ -18,7 +18,7 @@ app:
   database:
     enabled: false
 
-  per-page: ${APICOLLECTOR_PER_PAGE:1000}
+  per-page: ${APICOLLECTOR_PER_PAGE:300}
   decay-time: ${APICOLLECTOR_DECAY_TIME:15}
 
   api:
