@@ -11,7 +11,7 @@ app:
   api:
     base-url: ${APICOLLECTOR_API_BASE_URL:https://ckkb-mos.online/publicapi/v1/inspections}
     key: ${APICOLLECTOR_API_KEY:}
-    page-delay-ms: ${APICOLLECTOR_API_PAGE_DELAY_MS:1000}
+    page-delay-ms: ${APICOLLECTOR_API_PAGE_DELAY_MS:2000}
   database:
     enabled: ${APICOLLECTOR_DB_ENABLED:true}
     host: ${APICOLLECTOR_DB_HOST:localhost}
