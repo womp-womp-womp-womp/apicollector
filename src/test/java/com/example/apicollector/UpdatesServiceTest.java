@@ -26,6 +26,8 @@ import static org.mockito.Mockito.when;
 
 class UpdatesServiceTest {
 
+    private static final String API_KEY = "api-secret";
+
     private InspectionApiClient inspectionApiClient;
     private InspectionJsonParser jsonParser;
     private InspectionStorageService storageService;
@@ -46,12 +48,12 @@ class UpdatesServiceTest {
         InspectionDto inspection = inspection(1L);
         List<InspectionDto> parsed = List.of(inspection);
 
-        when(inspectionApiClient.fetchJson(1, 1)).thenReturn("total");
-        when(inspectionApiClient.fetchJson(1, 10)).thenReturn("page");
+        when(inspectionApiClient.fetchJson(1, 1, API_KEY)).thenReturn("total");
+        when(inspectionApiClient.fetchJson(1, 10, API_KEY)).thenReturn("page");
         when(jsonParser.parseTotal("total")).thenReturn(1L);
         when(jsonParser.parse("page")).thenReturn(parsed);
 
-        updatesService.updateAllData();
+        updatesService.updateAllData(API_KEY);
 
         InOrder inOrder = inOrder(storageService);
         inOrder.verify(storageService).clearStaging();
@@ -61,12 +63,12 @@ class UpdatesServiceTest {
 
     @Test
     void updateAllDataDoesNotReplaceMainDataWhenPageImportFails() {
-        when(inspectionApiClient.fetchJson(1, 1)).thenReturn("total");
-        when(inspectionApiClient.fetchJson(1, 10)).thenReturn("page");
+        when(inspectionApiClient.fetchJson(1, 1, API_KEY)).thenReturn("total");
+        when(inspectionApiClient.fetchJson(1, 10, API_KEY)).thenReturn("page");
         when(jsonParser.parseTotal("total")).thenReturn(1L);
         when(jsonParser.parse("page")).thenThrow(new IllegalStateException("broken page"));
 
-        assertThatThrownBy(() -> updatesService.updateAllData())
+        assertThatThrownBy(() -> updatesService.updateAllData(API_KEY))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessage("broken page");
 
@@ -79,7 +81,7 @@ class UpdatesServiceTest {
     void updateToDateRejectsEmptyOrInvalidLocalState() {
         when(storageService.findLatestInspection()).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> updatesService.updateToDate())
+        assertThatThrownBy(() -> updatesService.updateToDate(API_KEY))
                 .isInstanceOf(IncrementalUpdateUnavailableException.class)
                 .hasMessage("Incremental update cannot be started because local inspections are empty. Run full update as an admin first");
 
@@ -87,7 +89,7 @@ class UpdatesServiceTest {
                 new InspectionEntity(1L, 2L, null, 0, 0, "Location", "Address", "Contractor")
         ));
 
-        assertThatThrownBy(() -> updatesService.updateToDate())
+        assertThatThrownBy(() -> updatesService.updateToDate(API_KEY))
                 .isInstanceOf(IncrementalUpdateUnavailableException.class)
                 .hasMessage("Incremental update cannot be started because latest local inspection has no date. Run full update as an admin first");
     }
@@ -101,12 +103,12 @@ class UpdatesServiceTest {
         when(storageService.findLatestInspection()).thenReturn(Optional.of(
                 new InspectionEntity(1L, 1001L, latest, 0, 0, "Location", "Address", "Contractor")
         ));
-        when(inspectionApiClient.fetchJson(1, 1)).thenReturn("total");
-        when(inspectionApiClient.fetchJson(1, 10)).thenReturn("page");
+        when(inspectionApiClient.fetchJson(1, 1, API_KEY)).thenReturn("total");
+        when(inspectionApiClient.fetchJson(1, 10, API_KEY)).thenReturn("page");
         when(jsonParser.parseTotal("total")).thenReturn(1L);
         when(jsonParser.parse("page")).thenReturn(List.of(newer, old));
 
-        updatesService.updateToDate();
+        updatesService.updateToDate(API_KEY);
 
         verify(storageService).saveAllAndRebuildContractorStats(List.of(newer));
         assertThat(updatesService.getStatus()).containsEntry("status", "completed");
@@ -118,12 +120,12 @@ class UpdatesServiceTest {
         when(storageService.findLatestInspection()).thenReturn(Optional.of(
                 new InspectionEntity(1L, 1001L, latest, 0, 0, "Location", "Address", "Contractor")
         ));
-        when(inspectionApiClient.fetchJson(1, 1)).thenReturn("total");
-        when(inspectionApiClient.fetchJson(1, 10)).thenReturn("page");
+        when(inspectionApiClient.fetchJson(1, 1, API_KEY)).thenReturn("total");
+        when(inspectionApiClient.fetchJson(1, 10, API_KEY)).thenReturn("page");
         when(jsonParser.parseTotal("total")).thenReturn(1L);
         when(jsonParser.parse("page")).thenReturn(List.of(inspection(2L, null)));
 
-        updatesService.updateToDate();
+        updatesService.updateToDate(API_KEY);
 
         verify(storageService, never()).saveAllAndRebuildContractorStats(org.mockito.ArgumentMatchers.any());
     }
@@ -132,14 +134,14 @@ class UpdatesServiceTest {
     void invalidSettingsAreRejected() {
         ReflectionTestUtils.setField(updatesService, "perPage", 0L);
 
-        assertThatThrownBy(() -> updatesService.updateAllData())
+        assertThatThrownBy(() -> updatesService.updateAllData(API_KEY))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("app.per-page must be greater than 0");
 
         ReflectionTestUtils.setField(updatesService, "perPage", 10L);
         ReflectionTestUtils.setField(updatesService, "decayTime", -1L);
 
-        assertThatThrownBy(() -> updatesService.updateAllData())
+        assertThatThrownBy(() -> updatesService.updateAllData(API_KEY))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("app.decay-time must not be negative");
     }

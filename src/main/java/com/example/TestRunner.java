@@ -22,7 +22,7 @@ public class TestRunner implements CommandLineRunner {
     @Override
     public void run(String... args) throws Exception {
         System.out.println("--- ТЕСТОВЫЙ ВЫЗОВ МЕТОДА ---");
-                var result = myService.fetchJson(2, 1);
+                var result = myService.fetchJson(2, 1, "token");
         var total = parser.parseTotal(result);
 //        for (InspectionDto i : parser.parse(result)) {
 //            i.printFields();

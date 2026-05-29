@@ -54,6 +54,22 @@ public class DatabaseConfig {
                                 + "created_at timestamp NOT NULL DEFAULT now()"
                                 + ")"
                 );
+                statement.executeUpdate(
+                        "ALTER TABLE app_users "
+                                + "ADD COLUMN IF NOT EXISTS password_hash text NOT NULL DEFAULT 'legacy-unusable'"
+                );
+                statement.executeUpdate(
+                        "ALTER TABLE app_users "
+                                + "ADD COLUMN IF NOT EXISTS salt text NOT NULL DEFAULT 'legacy-unusable'"
+                );
+                statement.executeUpdate(
+                        "ALTER TABLE app_users "
+                                + "ADD COLUMN IF NOT EXISTS role text NOT NULL DEFAULT 'USER'"
+                );
+                statement.executeUpdate(
+                        "ALTER TABLE app_users "
+                                + "ADD COLUMN IF NOT EXISTS created_at timestamp NOT NULL DEFAULT now()"
+                );
 
                 if (tableExists(connection, "inspections")) {
                     statement.executeUpdate(

@@ -3,6 +3,7 @@ package com.example.controller;
 import com.example.db.entities.UserEntity;
 import com.example.db.repository.UserRepository;
 import com.example.exception.NotFoundException;
+import com.example.apiparser.InspectionApiClient;
 import com.example.jsonparser.dto.AuthDtos;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -25,42 +26,51 @@ public class AuthService {
     private static final String ROLE_ADMIN = "ADMIN";
 
     private final UserRepository userRepository;
+    private final InspectionApiClient inspectionApiClient;
     private final SecureRandom secureRandom = new SecureRandom();
-    private final Map<String, AuthDtos.UserDto> sessions = new ConcurrentHashMap<>();
+    private final Map<String, Session> sessions = new ConcurrentHashMap<>();
 
-    public AuthService(UserRepository userRepository) {
+    public AuthService(UserRepository userRepository, InspectionApiClient inspectionApiClient) {
         this.userRepository = userRepository;
+        this.inspectionApiClient = inspectionApiClient;
     }
 
     @Transactional
     public AuthDtos.AuthResponse register(AuthDtos.AuthRequest request) {
         String username = normalizeUsername(request.username());
-        String password = validatePassword(request.password());
 
         if (userRepository.existsById(username)) {
             throw new IllegalArgumentException("User already exists");
         }
 
+        boolean firstUser = userRepository.count() == 0;
+        String role = firstUser ? ROLE_ADMIN : ROLE_USER;
+        String credential = firstUser
+                ? validatePassword(request.password())
+                : validateApiKey(request.apiKey());
+        verifyUserApiKeyIfNeeded(role, credential);
         String salt = randomSalt();
-        String role = userRepository.count() == 0 ? ROLE_ADMIN : ROLE_USER;
-        UserEntity user = new UserEntity(username, hashPassword(password, salt), salt, role);
+        UserEntity user = new UserEntity(username, hashCredential(credential, salt), salt, role);
         userRepository.save(user);
 
-        return createSession(user);
+        return createSession(user, ROLE_USER.equals(role) ? credential : null);
     }
 
     @Transactional(readOnly = true)
     public AuthDtos.AuthResponse login(AuthDtos.AuthRequest request) {
         String username = normalizeUsername(request.username());
-        String password = validatePassword(request.password());
         UserEntity user = userRepository.findById(username)
                 .orElseThrow(() -> new NotFoundException("User was not found"));
+        String credential = ROLE_ADMIN.equals(user.getRole())
+                ? validatePassword(request.password())
+                : validateApiKey(request.apiKey());
+        verifyUserApiKeyIfNeeded(user.getRole(), credential);
 
-        if (!hashPassword(password, user.getSalt()).equals(user.getPasswordHash())) {
+        if (!hashCredential(credential, user.getSalt()).equals(user.getPasswordHash())) {
             throw new IllegalArgumentException("Invalid username or password");
         }
 
-        return createSession(user);
+        return createSession(user, ROLE_USER.equals(user.getRole()) ? credential : null);
     }
 
     @Transactional(readOnly = true)
@@ -72,13 +82,13 @@ public class AuthService {
     }
 
     public AuthDtos.UserDto requireUser(String token) {
-        AuthDtos.UserDto user = sessions.get(normalizeToken(token));
+        Session session = sessions.get(normalizeToken(token));
 
-        if (user == null) {
+        if (session == null) {
             throw new IllegalArgumentException("Authentication token is missing or invalid");
         }
 
-        return user;
+        return session.user();
     }
 
     public void requireAdmin(String token) {
@@ -89,10 +99,28 @@ public class AuthService {
         }
     }
 
-    private AuthDtos.AuthResponse createSession(UserEntity user) {
+    public String requireUserApiKey(String token) {
+        Session session = sessions.get(normalizeToken(token));
+
+        if (session == null) {
+            throw new IllegalArgumentException("Authentication token is missing or invalid");
+        }
+
+        if (!ROLE_USER.equals(session.user().role())) {
+            throw new IllegalArgumentException("User API key is required for this operation");
+        }
+
+        if (session.apiKey() == null || session.apiKey().isBlank()) {
+            throw new IllegalArgumentException("User API key is missing. Log in with API key again");
+        }
+
+        return session.apiKey();
+    }
+
+    private AuthDtos.AuthResponse createSession(UserEntity user, String apiKey) {
         String token = UUID.randomUUID().toString();
         AuthDtos.UserDto dto = new AuthDtos.UserDto(user.getUsername(), user.getRole());
-        sessions.put(token, dto);
+        sessions.put(token, new Session(dto, apiKey));
         return new AuthDtos.AuthResponse(user.getUsername(), user.getRole(), token);
     }
 
@@ -122,6 +150,20 @@ public class AuthService {
         return password;
     }
 
+    private String validateApiKey(String apiKey) {
+        if (apiKey == null || apiKey.isBlank() || "token".equals(apiKey.trim())) {
+            throw new IllegalArgumentException("API key must not be empty");
+        }
+
+        return apiKey.trim();
+    }
+
+    private void verifyUserApiKeyIfNeeded(String role, String apiKey) {
+        if (ROLE_USER.equals(role)) {
+            inspectionApiClient.checkApiAvailability(apiKey);
+        }
+    }
+
     private String normalizeToken(String token) {
         return token == null ? "" : token.trim();
     }
@@ -132,13 +174,16 @@ public class AuthService {
         return Base64.getEncoder().encodeToString(bytes);
     }
 
-    private String hashPassword(String password, String salt) {
+    private String hashCredential(String credential, String salt) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest((salt + ":" + password).getBytes(StandardCharsets.UTF_8));
+            byte[] hash = digest.digest((salt + ":" + credential).getBytes(StandardCharsets.UTF_8));
             return Base64.getEncoder().encodeToString(hash);
         } catch (NoSuchAlgorithmException e) {
             throw new IllegalStateException("SHA-256 is not available", e);
         }
+    }
+
+    private record Session(AuthDtos.UserDto user, String apiKey) {
     }
 }

@@ -5,13 +5,17 @@ import com.example.db.entities.InspectionStagingEntity;
 import com.example.db.repository.InspectionRepository;
 import com.example.db.repository.InspectionStagingRepository;
 import com.example.jsonparser.dto.InspectionDto;
+import org.springframework.jdbc.core.JdbcTemplate;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.sql.Timestamp;
 import java.util.Arrays;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.StringJoiner;
 
@@ -23,15 +27,18 @@ public class InspectionStorageService {
     private final InspectionRepository inspectionRepository;
     private final InspectionStagingRepository inspectionStagingRepository;
     private final ContractorStorageService contractorStorageService;
+    private final JdbcTemplate jdbcTemplate;
 
     public InspectionStorageService(
             InspectionRepository inspectionRepository,
             InspectionStagingRepository inspectionStagingRepository,
-            ContractorStorageService contractorStorageService
+            ContractorStorageService contractorStorageService,
+            JdbcTemplate jdbcTemplate
     ) {
         this.inspectionRepository = inspectionRepository;
         this.inspectionStagingRepository = inspectionStagingRepository;
         this.contractorStorageService = contractorStorageService;
+        this.jdbcTemplate = jdbcTemplate;
     }
 
     @Transactional
@@ -59,18 +66,27 @@ public class InspectionStorageService {
             return;
         }
 
-        int saved = 0;
-        int skipped = 0;
+        Map<Long, InspectionStagingEntity> validInspections = new LinkedHashMap<>();
+        int invalid = 0;
+        int duplicates = 0;
 
         for (InspectionDto dto : inspections) {
-            if (saveToStaging(dto)) {
-                saved++;
-            } else {
-                skipped++;
+            InspectionStagingEntity entity = toStagingEntity(dto);
+
+            if (entity == null) {
+                invalid++;
+                continue;
+            }
+
+            if (validInspections.putIfAbsent(entity.getPublicId(), entity) != null) {
+                duplicates++;
             }
         }
 
-        log.info("Inspection staging batch processed. saved={}, skipped={}", saved, skipped);
+        batchInsertStaging(validInspections.values().stream().toList());
+
+        log.info("Inspection staging batch processed. saved={}, invalid={}, duplicates={}",
+                validInspections.size(), invalid, duplicates);
     }
 
     @Transactional
@@ -169,19 +185,31 @@ public class InspectionStorageService {
 
     @Transactional
     public boolean saveToStaging(InspectionDto dto) {
-        if (!isValid(dto)) {
+        InspectionStagingEntity inspection = toStagingEntity(dto);
+
+        if (inspection == null) {
             return false;
         }
 
-        if (inspectionStagingRepository.existsById(dto.publicId())) {
-            log.debug("Inspection was skipped in staging because it already exists. publicId={}", dto.publicId());
+        if (inspectionStagingRepository.existsById(inspection.getPublicId())) {
+            log.debug("Inspection was skipped in staging because it already exists. publicId={}", inspection.getPublicId());
             return false;
+        }
+
+        inspectionStagingRepository.save(inspection);
+
+        return true;
+    }
+
+    private InspectionStagingEntity toStagingEntity(InspectionDto dto) {
+        if (!isValid(dto)) {
+            return null;
         }
 
         int violations = normalizeViolationsCount(dto);
         int criticalViolations = normalizeCriticalViolationsCount(dto);
 
-        InspectionStagingEntity inspection = new InspectionStagingEntity(
+        return new InspectionStagingEntity(
                 dto.publicId(),
                 dto.id(),
                 dto.date(),
@@ -191,10 +219,45 @@ public class InspectionStorageService {
                 dto.locationAddress(),
                 contractorsToText(dto.contractors())
         );
+    }
 
-        inspectionStagingRepository.save(inspection);
+    private void batchInsertStaging(List<InspectionStagingEntity> inspections) {
+        if (inspections.isEmpty()) {
+            return;
+        }
 
-        return true;
+        jdbcTemplate.batchUpdate(
+                """
+                        insert into inspections_staging (
+                            public_id,
+                            api_id,
+                            inspection_date,
+                            violations_count,
+                            critical_violations_count,
+                            location_name,
+                            location_address,
+                            contractors_text
+                        ) values (?, ?, ?, ?, ?, ?, ?, ?)
+                        """,
+                inspections,
+                inspections.size(),
+                (statement, inspection) -> {
+                    statement.setLong(1, inspection.getPublicId());
+
+                    if (inspection.getId() == null) {
+                        statement.setObject(2, null);
+                    } else {
+                        statement.setLong(2, inspection.getId());
+                    }
+
+                    statement.setTimestamp(3, Timestamp.valueOf(inspection.getDate()));
+                    statement.setInt(4, inspection.getViolationsCount());
+                    statement.setInt(5, inspection.getCriticalViolationsCount());
+                    statement.setString(6, inspection.getLocationName());
+                    statement.setString(7, inspection.getLocationAddress());
+                    statement.setString(8, inspection.getContractorsText());
+                }
+        );
     }
 
     @Transactional

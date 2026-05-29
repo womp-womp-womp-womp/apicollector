@@ -27,6 +27,8 @@ class InspectionApiClientTest {
     private final AtomicInteger requests = new AtomicInteger();
     private volatile String lastQuery;
     private volatile String lastApiKey;
+    private volatile String lastXApiKey;
+    private volatile String lastAuthorization;
     private volatile String lastAccept;
 
     @BeforeEach
@@ -45,12 +47,14 @@ class InspectionApiClientTest {
     @Test
     void fetchJsonBuildsRequestWithPaginationAndApiKey() {
         responses.add(new Response(200, "{\"data\":[]}"));
-        InspectionApiClient client = client("secret");
+        InspectionApiClient client = client();
 
-        assertThat(client.fetchJson(2, 50)).isEqualTo("{\"data\":[]}");
-        assertThat(lastQuery).isEqualTo("page=2&per_page=50");
+        assertThat(client.fetchJson(2, 50, "secret")).isEqualTo("{\"data\":[]}");
+        assertThat(lastQuery).isEqualTo("page=2&per_page=50&api-key=secret");
         assertThat(lastAccept).isEqualTo("application/json");
         assertThat(lastApiKey).isEqualTo("secret");
+        assertThat(lastXApiKey).isEqualTo("secret");
+        assertThat(lastAuthorization).isEqualTo("APIKEY secret");
         assertThat(requests).hasValue(1);
     }
 
@@ -58,34 +62,34 @@ class InspectionApiClientTest {
     void checkApiAvailabilityFetchesFirstPage() {
         responses.add(new Response(200, "{\"total\":0}"));
 
-        client("secret").checkApiAvailability();
+        client().checkApiAvailability("secret");
 
-        assertThat(lastQuery).isEqualTo("page=1&per_page=1");
+        assertThat(lastQuery).isEqualTo("page=1&per_page=1&api-key=secret");
     }
 
     @Test
     void fetchJsonRejectsInvalidSettingsAndParamsBeforeRequest() {
-        InspectionApiClient client = client("secret");
+        InspectionApiClient client = client();
 
-        assertThatThrownBy(() -> client.fetchJson(0, 10))
+        assertThatThrownBy(() -> client.fetchJson(0, 10, "secret"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("page must be greater than 0");
-        assertThatThrownBy(() -> client.fetchJson(1, 0))
+        assertThatThrownBy(() -> client.fetchJson(1, 0, "secret"))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessage("perPage must be greater than 0");
-        assertThatThrownBy(() -> new InspectionApiClient(RestClient.builder(), " ", "secret").fetchJson(1, 1))
+        assertThatThrownBy(() -> new InspectionApiClient(RestClient.builder(), " ").fetchJson(1, 1, "secret"))
                 .isInstanceOf(ExternalApiException.class)
                 .hasMessage("External API base URL is not configured");
-        assertThatThrownBy(() -> new InspectionApiClient(RestClient.builder(), baseUrl, "token").fetchJson(1, 1))
+        assertThatThrownBy(() -> new InspectionApiClient(RestClient.builder(), baseUrl).fetchJson(1, 1, "token"))
                 .isInstanceOf(ExternalApiException.class)
-                .hasMessage("External API key is not configured. Set APICOLLECTOR_API_KEY before running /updateAll");
+                .hasMessage("External API key is not configured. Provide an API key before running update");
     }
 
     @Test
     void fetchJsonMapsHttpErrorsWithStatusAndRetryability() {
         responses.add(new Response(400, "bad request"));
 
-        assertThatThrownBy(() -> client("secret").fetchJson(1, 1))
+        assertThatThrownBy(() -> client().fetchJson(1, 1, "secret"))
                 .isInstanceOfSatisfying(ExternalApiException.class, e -> {
                     assertThat(e.getStatusCode()).isEqualTo(400);
                     assertThat(e.isRetryable()).isFalse();
@@ -99,18 +103,20 @@ class InspectionApiClientTest {
         responses.add(new Response(500, ""));
         responses.add(new Response(200, "{\"data\":[]}"));
 
-        assertThat(client("secret").fetchJson(1, 1)).isEqualTo("{\"data\":[]}");
+        assertThat(client().fetchJson(1, 1, "secret")).isEqualTo("{\"data\":[]}");
         assertThat(requests).hasValue(3);
     }
 
-    private InspectionApiClient client(String apiKey) {
-        return new InspectionApiClient(RestClient.builder(), baseUrl, apiKey);
+    private InspectionApiClient client() {
+        return new InspectionApiClient(RestClient.builder(), baseUrl);
     }
 
     private void handle(HttpExchange exchange) throws IOException {
         requests.incrementAndGet();
         lastQuery = exchange.getRequestURI().getQuery();
         lastApiKey = exchange.getRequestHeaders().getFirst("API-Key");
+        lastXApiKey = exchange.getRequestHeaders().getFirst("X-API-Key");
+        lastAuthorization = exchange.getRequestHeaders().getFirst("Authorization");
         lastAccept = exchange.getRequestHeaders().getFirst("accept");
         Response response = responses.remove();
         byte[] body = response.body().getBytes(StandardCharsets.UTF_8);

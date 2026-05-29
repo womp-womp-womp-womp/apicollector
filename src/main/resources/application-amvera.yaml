@@ -29,6 +29,7 @@ app:
   api:
     base-url: ${APICOLLECTOR_API_BASE_URL:https://ckkb-mos.online/publicapi/v1/inspections}
     key: ${APICOLLECTOR_API_KEY}
+    page-delay-ms: ${APICOLLECTOR_API_PAGE_DELAY_MS:0}
 
   cors:
     allowed-origins: ${APICOLLECTOR_CORS_ALLOWED_ORIGINS:}

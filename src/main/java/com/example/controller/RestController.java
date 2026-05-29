@@ -45,14 +45,25 @@ public class RestController {
     }
 
     @PostMapping("/updateAll")
-    public ResponseEntity<Void> updateAllData() {
-        updatesService.updateAllData();
+    public ResponseEntity<Void> updateAllData(
+            @RequestHeader("X-Auth-Token") String token,
+            @RequestBody(required = false) AuthDtos.UpdateRequest request
+    ) {
+        authService.requireAdmin(token);
+        updatesService.updateAllData(requireRequestApiKey(request));
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/update")
-    public ResponseEntity<Void> updateToDate() {
-        updatesService.updateToDate();
+    public ResponseEntity<Void> updateToDate(
+            @RequestHeader("X-Auth-Token") String token,
+            @RequestBody(required = false) AuthDtos.UpdateRequest request
+    ) {
+        AuthDtos.UserDto user = authService.requireUser(token);
+        String apiKey = "ADMIN".equals(user.role())
+                ? requireRequestApiKey(request)
+                : authService.requireUserApiKey(token);
+        updatesService.updateToDate(apiKey);
         return ResponseEntity.ok().build();
     }
 
@@ -124,17 +135,31 @@ public class RestController {
     }
 
     @PostMapping("/admin/updateAll")
-    public ResponseEntity<Void> adminUpdateAll(@RequestHeader("X-Auth-Token") String token) {
+    public ResponseEntity<Void> adminUpdateAll(
+            @RequestHeader("X-Auth-Token") String token,
+            @RequestBody(required = false) AuthDtos.UpdateRequest request
+    ) {
         authService.requireAdmin(token);
-        updatesService.updateAllData();
+        updatesService.updateAllData(requireRequestApiKey(request));
         return ResponseEntity.ok().build();
     }
 
     @PostMapping("/admin/update")
-    public ResponseEntity<Void> adminUpdate(@RequestHeader("X-Auth-Token") String token) {
+    public ResponseEntity<Void> adminUpdate(
+            @RequestHeader("X-Auth-Token") String token,
+            @RequestBody(required = false) AuthDtos.UpdateRequest request
+    ) {
         authService.requireAdmin(token);
-        updatesService.updateToDate();
+        updatesService.updateToDate(requireRequestApiKey(request));
         return ResponseEntity.ok().build();
+    }
+
+    private String requireRequestApiKey(AuthDtos.UpdateRequest request) {
+        if (request == null || request.apiKey() == null || request.apiKey().isBlank()) {
+            throw new IllegalArgumentException("API key is required");
+        }
+
+        return request.apiKey().trim();
     }
 
     @ExceptionHandler(RuntimeException.class)

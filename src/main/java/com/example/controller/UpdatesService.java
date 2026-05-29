@@ -26,8 +26,6 @@ import java.util.concurrent.locks.ReentrantLock;
 public class UpdatesService {
 
     private static final Logger log = LoggerFactory.getLogger(UpdatesService.class);
-    private static final Duration API_PAGE_DELAY = Duration.ofSeconds(2);
-
     private final InspectionApiClient inspectionApiClient;
     private final InspectionJsonParser jsonParser;
     private final InspectionStorageService storageService;
@@ -44,6 +42,9 @@ public class UpdatesService {
     @Value("${app.decay-time}")
     private long decayTime;
 
+    @Value("${app.api.page-delay-ms:0}")
+    private long apiPageDelayMs;
+
     public UpdatesService(
             InspectionApiClient inspectionApiClient,
             InspectionJsonParser jsonParser,
@@ -54,12 +55,12 @@ public class UpdatesService {
         this.storageService = storageService;
     }
 
-    public void updateAllData() {
-        runWithUpdateLock(this::doUpdateAllData);
+    public void updateAllData(String apiKey) {
+        runWithUpdateLock(() -> doUpdateAllData(apiKey));
     }
 
-    public void updateToDate() {
-        runWithUpdateLock(this::doUpdateToDate);
+    public void updateToDate(String apiKey) {
+        runWithUpdateLock(() -> doUpdateToDate(apiKey));
     }
 
     public Map<String, Object> getStatus() {
@@ -72,12 +73,12 @@ public class UpdatesService {
         return result;
     }
 
-    private void doUpdateAllData() {
+    private void doUpdateAllData(String apiKey) {
         validateSettings();
 
-        inspectionApiClient.checkApiAvailability();
+        inspectionApiClient.checkApiAvailability(apiKey);
 
-        long lastPage = getPagesCount();
+        long lastPage = getPagesCount(apiKey);
         long processedRecords = 0;
 
         log.info("Full update started. pages={}, perPage={}", lastPage, perPage);
@@ -85,7 +86,7 @@ public class UpdatesService {
         storageService.clearStaging();
 
         for (long currentPage = 1; currentPage <= lastPage; currentPage++) {
-            String json = inspectionApiClient.fetchJson(currentPage, perPage);
+            String json = inspectionApiClient.fetchJson(currentPage, perPage, apiKey);
             List<InspectionDto> parsed = jsonParser.parse(json);
             storageService.saveAllToStaging(parsed);
             processedRecords += parsed.size();
@@ -101,7 +102,7 @@ public class UpdatesService {
         log.info("Full update finished successfully. processedRecords={}", processedRecords);
     }
 
-    private void doUpdateToDate() {
+    private void doUpdateToDate(String apiKey) {
         validateSettings();
 
         Optional<InspectionEntity> latestInspectionOptional = storageService.findLatestInspection();
@@ -121,7 +122,7 @@ public class UpdatesService {
             );
         }
 
-        long lastPage = getPagesCount();
+        long lastPage = getPagesCount(apiKey);
         boolean reachedOldData = false;
         List<InspectionDto> newInspections = new ArrayList<>();
 
@@ -129,7 +130,7 @@ public class UpdatesService {
                 latestLoadedDate, lastPage, perPage);
 
         for (long currentPage = 1; currentPage <= lastPage && !reachedOldData; currentPage++) {
-            String json = inspectionApiClient.fetchJson(currentPage, perPage);
+            String json = inspectionApiClient.fetchJson(currentPage, perPage, apiKey);
             List<InspectionDto> parsed = jsonParser.parse(json);
 
             for (InspectionDto dto : parsed) {
@@ -163,8 +164,8 @@ public class UpdatesService {
         log.info("Incremental update finished successfully. newRecords={}", newInspections.size());
     }
 
-    private long getPagesCount() {
-        String data = inspectionApiClient.fetchJson(1, 1);
+    private long getPagesCount(String apiKey) {
+        String data = inspectionApiClient.fetchJson(1, 1, apiKey);
         long total = jsonParser.parseTotal(data);
         return (total + perPage - 1) / perPage;
     }
@@ -201,15 +202,19 @@ public class UpdatesService {
         if (decayTime < 0) {
             throw new IllegalArgumentException("app.decay-time must not be negative");
         }
+
+        if (apiPageDelayMs < 0) {
+            throw new IllegalArgumentException("app.api.page-delay-ms must not be negative");
+        }
     }
 
     private void sleepBetweenApiRequests(long currentPage, long lastPage) {
-        if (currentPage >= lastPage) {
+        if (currentPage >= lastPage || apiPageDelayMs == 0) {
             return;
         }
 
         try {
-            Thread.sleep(API_PAGE_DELAY.toMillis());
+            Thread.sleep(Duration.ofMillis(apiPageDelayMs).toMillis());
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
             throw new UpdateInterruptedException("Update was interrupted", e);

@@ -28,12 +28,10 @@ public class InspectionApiClient {
 
     private final RestClient restClient;
     private final String baseUrl;
-    private final String apiKey;
 
     public InspectionApiClient(
             RestClient.Builder restClientBuilder,
-            @Value("${app.api.base-url}") String baseUrl,
-            @Value("${app.api.key}") String apiKey
+            @Value("${app.api.base-url}") String baseUrl
     ) {
         SimpleClientHttpRequestFactory requestFactory = new SimpleClientHttpRequestFactory();
         requestFactory.setConnectTimeout(Duration.ofSeconds(5));
@@ -43,29 +41,29 @@ public class InspectionApiClient {
                 .requestFactory(requestFactory)
                 .build();
         this.baseUrl = baseUrl;
-        this.apiKey = apiKey;
     }
 
-    private String buildInspectionsUrl(long page, long perPage) {
+    private String buildInspectionsUrl(long page, long perPage, String apiKey) {
         return UriComponentsBuilder.fromUri(URI.create(baseUrl))
                 .queryParam("page", page)
                 .queryParam("per_page", perPage)
+                .queryParam("api-key", apiKey)
                 .toUriString();
     }
 
-    public void checkApiAvailability() {
-        fetchJson(1, 1);
+    public void checkApiAvailability(String apiKey) {
+        fetchJson(1, 1, apiKey);
     }
 
-    public String fetchJson(long page, long perPage) {
+    public String fetchJson(long page, long perPage, String apiKey) {
         validateRequestParams(page, perPage);
-        validateApiSettings();
+        validateApiSettings(apiKey);
 
         ExternalApiException lastException = null;
 
         for (int attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
             try {
-                return fetchJsonOnce(page, perPage);
+                return fetchJsonOnce(page, perPage, apiKey);
             } catch (ExternalApiException e) {
                 lastException = e;
 
@@ -91,8 +89,8 @@ public class InspectionApiClient {
                 : lastException;
     }
 
-    private String fetchJsonOnce(long page, long perPage) {
-        String url = buildInspectionsUrl(page, perPage);
+    private String fetchJsonOnce(long page, long perPage, String apiKey) {
+        String url = buildInspectionsUrl(page, perPage, apiKey);
 
         try {
             String body = restClient
@@ -100,6 +98,8 @@ public class InspectionApiClient {
                     .uri(url)
                     .header("accept", "application/json")
                     .header("API-Key", apiKey)
+                    .header("X-API-Key", apiKey)
+                    .header("Authorization", "APIKEY " + apiKey)
                     .retrieve()
                     .onStatus(HttpStatusCode::isError, (request, response) -> {
                         int statusCode = response.getStatusCode().value();
@@ -151,14 +151,14 @@ public class InspectionApiClient {
         }
     }
 
-    private void validateApiSettings() {
+    private void validateApiSettings(String apiKey) {
         if (baseUrl == null || baseUrl.isBlank()) {
             throw new ExternalApiException("External API base URL is not configured", null, null, false);
         }
 
         if (apiKey == null || apiKey.isBlank() || "token".equals(apiKey)) {
             throw new ExternalApiException(
-                    "External API key is not configured. Set APICOLLECTOR_API_KEY before running /updateAll",
+                    "External API key is not configured. Provide an API key before running update",
                     null,
                     null,
                     false

@@ -38,7 +38,7 @@ class RestControllerTest {
 
     @Test
     void authEndpointsDelegateToAuthService() {
-        AuthDtos.AuthRequest request = new AuthDtos.AuthRequest("user", "secret1");
+        AuthDtos.AuthRequest request = new AuthDtos.AuthRequest("user", null, "api-secret");
         AuthDtos.AuthResponse response = new AuthDtos.AuthResponse("user", "USER", "token");
         AuthDtos.UserDto user = new AuthDtos.UserDto("user", "USER");
         when(authService.register(request)).thenReturn(response);
@@ -52,13 +52,30 @@ class RestControllerTest {
 
     @Test
     void updateEndpointsDelegateAndReturnOk() {
-        assertThat(controller.updateAllData().getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(controller.updateToDate().getStatusCode()).isEqualTo(HttpStatus.OK);
+        AuthDtos.UpdateRequest adminRequest = new AuthDtos.UpdateRequest("admin-api-key");
+        when(authService.requireUser("user-token")).thenReturn(new AuthDtos.UserDto("user", "USER"));
+        when(authService.requireUserApiKey("user-token")).thenReturn("user-api-key");
+
+        assertThat(controller.updateAllData("admin-token", adminRequest).getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(controller.updateToDate("user-token", null).getStatusCode()).isEqualTo(HttpStatus.OK);
         when(updatesService.getStatus()).thenReturn(Map.of("status", "idle"));
 
         assertThat(controller.getUpdateStatus()).containsEntry("status", "idle");
-        verify(updatesService).updateAllData();
-        verify(updatesService).updateToDate();
+        verify(authService).requireAdmin("admin-token");
+        verify(authService).requireUser("user-token");
+        verify(authService).requireUserApiKey("user-token");
+        verify(updatesService).updateAllData("admin-api-key");
+        verify(updatesService).updateToDate("user-api-key");
+    }
+
+    @Test
+    void adminCanRunIncrementalUpdateWithExplicitApiKey() {
+        when(authService.requireUser("admin-token")).thenReturn(new AuthDtos.UserDto("admin", "ADMIN"));
+
+        assertThat(controller.updateToDate("admin-token", new AuthDtos.UpdateRequest("admin-api-key")).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+
+        verify(updatesService).updateToDate("admin-api-key");
     }
 
     @Test
@@ -86,12 +103,14 @@ class RestControllerTest {
         when(authService.listUsers()).thenReturn(List.of(admin));
 
         assertThat(controller.users("admin-token")).containsExactly(admin);
-        assertThat(controller.adminUpdateAll("admin-token").getStatusCode()).isEqualTo(HttpStatus.OK);
-        assertThat(controller.adminUpdate("admin-token").getStatusCode()).isEqualTo(HttpStatus.OK);
+        assertThat(controller.adminUpdateAll("admin-token", new AuthDtos.UpdateRequest("admin-api-key")).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
+        assertThat(controller.adminUpdate("admin-token", new AuthDtos.UpdateRequest("admin-api-key")).getStatusCode())
+                .isEqualTo(HttpStatus.OK);
 
         verify(authService, times(3)).requireAdmin("admin-token");
-        verify(updatesService).updateAllData();
-        verify(updatesService).updateToDate();
+        verify(updatesService).updateAllData("admin-api-key");
+        verify(updatesService).updateToDate("admin-api-key");
     }
 
     @Test
